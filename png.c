@@ -5,7 +5,11 @@
 typedef struct png_Chunk
 {
 	unsigned int length;
-	unsigned char type[4];
+	union
+	{
+		unsigned char type[4];
+		unsigned int type_as_int;
+	};
 	unsigned char *data;
 	unsigned int checksum;
 } png_Chunk;
@@ -17,6 +21,7 @@ unsigned int swap32(unsigned int val)
 
 void process_chunk(png_Chunk *chunk)
 {
+	printf("--- %d\n", chunk->type_as_int);
 }
 
 int main(void)
@@ -49,10 +54,13 @@ int main(void)
 		chunk.data = (unsigned char *) malloc(chunk.length);
 		fread(chunk.data, 1, chunk.length, png_file);
 		fread(&chunk.checksum, 1, 4, png_file);
-		chunk.checksum = swap(chunk.checksum);
+		chunk.checksum = swap32(chunk.checksum);
 		
 		// Print it out
 		printf("%d %.4s\n", chunk.length, chunk.type);
+		
+		// Process it
+		process_chunk(&chunk);
 		
 		// Clean it up
 		free(chunk.data);
