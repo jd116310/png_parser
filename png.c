@@ -29,9 +29,44 @@ unsigned int swap32(unsigned int val)
     return ((val & 0xFF) << 24) | ((val & 0xFF00) << 8) | ((val >> 8) & 0xFF00) | ((val >> 24) & 0xFF);
 }
 
+#define PNG_IHDR_PALETTE_USED	1
+#define PNG_IHDR_COLOR_USED		2
+#define PNG_IHDR_APLHA_USED		4
+
+
 void process_IHDR(png_Chunk *chunk)
 {
-	printf("Hello from IHDR\n");
+	typedef struct png_Header
+	{
+		int width, height;
+		unsigned char bit_depth, color_type, compression, filter, interlace;
+	} png_Header;
+
+	png_Header header;
+	
+	printf("process_IHDR()\n");
+	
+	if(chunk->length != 13)
+	{
+		printf("Error: IHDR size != 13\n");
+		return;
+	}
+	
+	memcpy(&header, chunk->data, 13);
+	
+	header.width = swap32(header.width);
+	header.height = swap32(header.height);
+	
+	printf("\tImage stats:\n");
+	printf("\t\t%dpx x %dpx\n", header.width, header.height);
+	printf("\t\tBit Depth = %d bits per sample\n", header.bit_depth);
+	printf("\t\tColor type:\n");
+	if(header.color_type & PNG_IHDR_PALETTE_USED) printf("\t\t\tPalette\n");
+	if(header.color_type & PNG_IHDR_COLOR_USED)	printf("\t\t\tColor\n");
+	if(header.color_type & PNG_IHDR_APLHA_USED)	printf("\t\t\tAlpha\n");
+	if(header.compression == 0) printf("\t\tCompression: method 0\n");
+	if(header.filter == 0) printf("\t\tFilter: method 0\n");
+	printf("\t\tInterlace: %s\n", header.interlace == 0 ? "none" : "Adam7");
 }
 void process_IDAT(png_Chunk *chunk)
 {
@@ -39,7 +74,8 @@ void process_IDAT(png_Chunk *chunk)
 }
 void process_IEND(png_Chunk *chunk)
 {
-	printf("Hello from IEND\n");
+	printf("process_IEND()\n");
+	printf("%d\n", chunk->length);
 }
 
 #define REGISTER_TYPE(x) {#x,*process_##x}
