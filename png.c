@@ -32,7 +32,7 @@ unsigned int swap32(unsigned int val)
 #define PNG_IHDR_PALETTE_USED	1
 #define PNG_IHDR_COLOR_USED		2
 #define PNG_IHDR_APLHA_USED		4
-
+#define PNG_IHDR_SIZE			13
 
 void process_IHDR(png_Chunk *chunk)
 {
@@ -46,13 +46,13 @@ void process_IHDR(png_Chunk *chunk)
 	
 	printf("process_IHDR()\n");
 	
-	if(chunk->length != 13)
+	if(chunk->length != PNG_IHDR_SIZE)
 	{
-		printf("Error: IHDR size != 13\n");
+		printf("Error: IHDR size != %d\n", PNG_IHDR_SIZE);
 		return;
 	}
 	
-	memcpy(&header, chunk->data, 13);
+	memcpy(&header, chunk->data, PNG_IHDR_SIZE);
 	
 	header.width = swap32(header.width);
 	header.height = swap32(header.height);
