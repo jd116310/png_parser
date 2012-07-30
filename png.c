@@ -70,7 +70,7 @@ void process_IHDR(png_Chunk *chunk)
 	if(header.filter == 0) printf("\t\tFilter: method 0\n");
 	printf("\t\tInterlace: %s\n", header.interlace == 0 ? "none" : "Adam7");
 }
-#define ZLIB_CHUNK_SIZE 16384*2
+#define ZLIB_CHUNK_SIZE 32768
 #define min(a,b) (((a) < (b)) ? (a) : (b))
 void process_IDAT(png_Chunk *chunk)
 {
@@ -85,6 +85,8 @@ void process_IDAT(png_Chunk *chunk)
 	unsigned char *in;
 	
 	idat_count++;
+	
+	printf("process_IDAT()\n");
 	if(idat_count == 1)
 	{
 		strm.zalloc = Z_NULL;
@@ -99,10 +101,9 @@ void process_IDAT(png_Chunk *chunk)
 	}
 	if (chunk->length == 0)
 		return;
-	
-	do
+	do	
 	{
-		strm.avail_in = min(chunk->length, ZLIB_CHUNK_SIZE);
+		strm.avail_in = min(chunk->length - bytes_processed, ZLIB_CHUNK_SIZE);
 		strm.next_in = chunk->data + bytes_processed;
 		bytes_processed += strm.avail_in;
 		
@@ -119,23 +120,30 @@ void process_IDAT(png_Chunk *chunk)
 					ret = Z_DATA_ERROR;     /* and fall through */
 				case Z_DATA_ERROR:
 				case Z_MEM_ERROR:
-					printf("inflate() returned %s.\n", strm.msg);
+					printf("inflate() error: %s.\n", strm.msg);
 					(void)inflateEnd(&strm);
 					return;
 			}
+			int have = ZLIB_CHUNK_SIZE - strm.avail_out;
 			bytes_output += (ZLIB_CHUNK_SIZE - strm.avail_out);
 		} while (strm.avail_out == 0);
-		
 	} while (ret != Z_STREAM_END);
-	printf("Inflate %d to %d bits\n", chunk->length, bytes_output);
-
+	printf("\tInflate %d to %d bits\n", chunk->length, bytes_output);
 	(void)inflateEnd(&strm);
 	return;
 }
 void process_IEND(png_Chunk *chunk)
 {
 	printf("process_IEND()\n");
-	printf("%d\n", chunk->length);
+}
+
+void process_tEXt(png_Chunk *chunk)
+{
+	printf("process_tEXt() %d\n", chunk->length);
+	
+	printf("\t%s\n", chunk->data);
+	
+	printf("\t%s\n", &chunk->data[strlen(chunk->data) + 1]);
 }
 
 #define REGISTER_TYPE(x) {#x,*process_##x}
@@ -143,7 +151,8 @@ static png_Type_Callback callbacks[] =
 {
 	REGISTER_TYPE(IHDR),
 	REGISTER_TYPE(IDAT),
-	REGISTER_TYPE(IEND)
+	REGISTER_TYPE(IEND),
+	REGISTER_TYPE(tEXt)
 };
 
 void process_chunk(png_Chunk *chunk)
