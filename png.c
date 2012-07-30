@@ -155,10 +155,70 @@ static png_Type_Callback callbacks[] =
 	REGISTER_TYPE(tEXt)
 };
 
+/* Table of CRCs of all 8-bit messages. */
+unsigned long crc_table[256];
+
+/* Make the table for a fast CRC. */
+void make_crc_table(void)
+{
+	unsigned long c;
+	int n, k;
+
+	for (n = 0; n < 256; n++) {
+		c = (unsigned long) n;
+		for (k = 0; k < 8; k++) {
+			if (c & 1)
+			c = 0xedb88320L ^ (c >> 1);
+			else
+			c = c >> 1;
+		}
+		crc_table[n] = c;
+	}
+	crc_table_computed = 1;
+}
+
+
+/* Update a running CRC with the bytes buf[0..len-1]--the CRC
+should be initialized to all 1's, and the transmitted value
+is the 1's complement of the final running CRC (see the
+crc() routine below). */
+
+unsigned long update_crc(unsigned long crc, unsigned char *buf, int len)
+{
+	static int crc_table_computed = 0;
+	unsigned long c = crc;
+	int n;
+
+	if (!crc_table_computed)
+	{
+		make_crc_table();
+		crc_table_computed = 1;
+	}
+	
+	for (n = 0; n < len; n++)
+		c = crc_table[(c ^ buf[n]) & 0xff] ^ (c >> 8);
+	return c;
+}
+
 void process_chunk(png_Chunk *chunk)
 {
 	int len = sizeof(callbacks) / sizeof(callbacks[0]);
 	int i;
+	
+	// verify the checksum
+	unsigned long c;
+	c = update_crc(0xffffffffL, chunk->type, sizeof(chunk->type));
+	c = update_crc(          c, chunk->data, chunk->length);
+	c ^= 0xffffffffL;
+	
+	printf("Chunk => %.4s\n", chunk->type);
+	if(c != chunk->checksum)
+	{
+		printf("Error, checksum does not match!\n");
+		printf("%x %x\n", c, chunk->checksum);
+		return;
+	}
+	
 	for(i = 0; i < len; ++i)
 	{
 		if(callbacks[i].type_as_int == chunk->type_as_int)
@@ -196,10 +256,14 @@ int main(void)
 	{
 		// Read in chunk
 		fread(buffer, 1, 8, png_file);
+		
 		if(feof(png_file)) break;
+		
 		memcpy(&chunk, buffer, 8);
+		
 		chunk.length = swap32(chunk.length);
-		chunk.data = (unsigned char *) malloc(chunk.length);
+		if(chunk.length > 0);
+			chunk.data = (unsigned char *) malloc(chunk.length);
 		fread(chunk.data, 1, chunk.length, png_file);
 		fread(&chunk.checksum, 1, 4, png_file);
 		chunk.checksum = swap32(chunk.checksum);
