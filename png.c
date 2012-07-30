@@ -201,18 +201,25 @@ unsigned long update_crc(unsigned long crc, unsigned char *buf, int len)
 	return c;
 }
 
+#define CRC_ALL_ONES 0xffffffffL
 void process_chunk(png_Chunk *chunk)
 {
 	int len = sizeof(callbacks) / sizeof(callbacks[0]);
 	int i;
+	unsigned long c = CRC_ALL_ONES;
+	
+	printf("\n==================\n");
+	printf("Type    \"%.4s\"\n", chunk->type);
+	printf("Length  %d\n", chunk->length);
+	printf("CRC     0x%X\n", chunk->checksum);
+	printf("==================\n");
 	
 	// verify the checksum
-	unsigned long c;
-	c = update_crc(0xffffffffL, chunk->type, sizeof(chunk->type));
-	c = update_crc(          c, chunk->data, chunk->length);
-	c ^= 0xffffffffL;
+	c = update_crc(c, chunk->type, sizeof(chunk->type));
+	c = update_crc(c, chunk->data, chunk->length);
+	c ^= CRC_ALL_ONES;
 	
-	printf("Chunk => %.4s\n", chunk->type);
+	
 	if(c != chunk->checksum)
 	{
 		printf("Error, checksum does not match!\n");
