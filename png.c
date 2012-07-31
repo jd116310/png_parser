@@ -4,6 +4,23 @@
 
 #include "zlib.h"
 
+typedef struct pixel
+{
+	unsigned char r, g, b;
+} pixel;
+
+typedef struct png_File
+{
+	// make sure these are first
+	int width, height;
+	unsigned char bit_depth, color_type, compression, filter, interlace;
+	
+	FILE *file;
+	pixel *palette;
+} png_File;
+
+png_File pfile;
+
 typedef struct png_Chunk
 {
 	unsigned int length;
@@ -24,6 +41,7 @@ typedef struct png_Type_Callback
 		unsigned int type_as_int;
 	};
 	void (*callback)(png_Chunk *chunk);
+	int count;
 } png_Type_Callback;
 
 unsigned int swap32(unsigned int val) 
@@ -37,15 +55,7 @@ unsigned int swap32(unsigned int val)
 #define PNG_IHDR_SIZE			13
 
 void process_IHDR(png_Chunk *chunk)
-{
-	typedef struct png_Header
-	{
-		int width, height;
-		unsigned char bit_depth, color_type, compression, filter, interlace;
-	} png_Header;
-
-	png_Header header;
-	
+{	
 	printf("process_IHDR()\n");
 	
 	if(chunk->length != PNG_IHDR_SIZE)
@@ -54,21 +64,21 @@ void process_IHDR(png_Chunk *chunk)
 		return;
 	}
 	
-	memcpy(&header, chunk->data, PNG_IHDR_SIZE);
+	memcpy(&pfile, chunk->data, PNG_IHDR_SIZE);
 	
-	header.width = swap32(header.width);
-	header.height = swap32(header.height);
+	pfile.width = swap32(pfile.width);
+	pfile.height = swap32(pfile.height);
 	
 	printf("\tImage stats:\n");
-	printf("\t\t%dpx x %dpx\n", header.width, header.height);
-	printf("\t\tBit Depth = %d bits per sample\n", header.bit_depth);
+	printf("\t\t%dpx x %dpx\n", pfile.width, pfile.height);
+	printf("\t\tBit Depth = %d bits per sample\n", pfile.bit_depth);
 	printf("\t\tColor type:\n");
-	if(header.color_type & PNG_IHDR_PALETTE_USED) printf("\t\t\tPalette\n");
-	if(header.color_type & PNG_IHDR_COLOR_USED)	printf("\t\t\tColor\n");
-	if(header.color_type & PNG_IHDR_APLHA_USED)	printf("\t\t\tAlpha\n");
-	if(header.compression == 0) printf("\t\tCompression: method 0\n");
-	if(header.filter == 0) printf("\t\tFilter: method 0\n");
-	printf("\t\tInterlace: %s\n", header.interlace == 0 ? "none" : "Adam7");
+	if(pfile.color_type & PNG_IHDR_PALETTE_USED) printf("\t\t\tPalette\n");
+	if(pfile.color_type & PNG_IHDR_COLOR_USED)	printf("\t\t\tColor\n");
+	if(pfile.color_type & PNG_IHDR_APLHA_USED)	printf("\t\t\tAlpha\n");
+	if(pfile.compression == 0) printf("\t\tCompression: method 0\n");
+	if(pfile.filter == 0) printf("\t\tFilter: method 0\n");
+	printf("\t\tInterlace: %s\n", pfile.interlace == 0 ? "none" : "Adam7");
 }
 #define ZLIB_CHUNK_SIZE 32768
 #define min(a,b) (((a) < (b)) ? (a) : (b))
@@ -121,7 +131,7 @@ void process_IDAT(png_Chunk *chunk)
 				case Z_DATA_ERROR:
 				case Z_MEM_ERROR:
 					printf("inflate() error: %s.\n", strm.msg);
-					(void)inflateEnd(&strm);
+					inflateEnd(&strm);
 					return;
 			}
 			int have = ZLIB_CHUNK_SIZE - strm.avail_out;
@@ -129,7 +139,7 @@ void process_IDAT(png_Chunk *chunk)
 		} while (strm.avail_out == 0);
 	} while (ret != Z_STREAM_END);
 	printf("\tInflate %d to %d bits\n", chunk->length, bytes_output);
-	(void)inflateEnd(&strm);
+	inflateEnd(&strm);
 	return;
 }
 void process_IEND(png_Chunk *chunk)
@@ -142,11 +152,10 @@ void process_tEXt(png_Chunk *chunk)
 	printf("process_tEXt() %d\n", chunk->length);
 	
 	printf("\t%s\n", chunk->data);
-	
 	printf("\t%s\n", &chunk->data[strlen(chunk->data) + 1]);
 }
 
-#define REGISTER_TYPE(x) {#x,*process_##x}
+#define REGISTER_TYPE(x) {#x, *process_##x, 0}
 static png_Type_Callback callbacks[] = 
 {
 	REGISTER_TYPE(IHDR),
@@ -223,6 +232,8 @@ void process_chunk(png_Chunk *chunk)
 	if(c != chunk->checksum)
 	{
 		printf("Error, checksum does not match!\n");
+		// if(critical())
+			// exit()
 		printf("%x %x\n", c, chunk->checksum);
 		return;
 	}
@@ -231,6 +242,7 @@ void process_chunk(png_Chunk *chunk)
 	{
 		if(callbacks[i].type_as_int == chunk->type_as_int)
 		{
+			callbacks[i].count++;
 			(*callbacks[i].callback)(chunk);
 			break;
 		}
@@ -242,38 +254,38 @@ void process_chunk(png_Chunk *chunk)
 
 int main(void)
 {
-	png_Chunk chunk;
-	FILE *png_file;
 	const unsigned char header[] = {0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A};
 	unsigned int c;
 	unsigned char buffer[8];
+	png_Chunk chunk;
 	
-	png_file = fopen("test.png", "rb");
+	pfile.file = fopen("test.png", "rb");
+	printf("%d\n", sizeof(pixel));
 	
-	if(png_file == NULL)
+	if(pfile.file == NULL)
 	{
 		printf("Error: cannot open file\n");
 		return 1;
 	}
 	
-	fread(buffer, 1, 8, png_file);
+	fread(buffer, 1, 8, pfile.file);
 	if(!memcmp(header, buffer, 8))
 		printf("Magic header found\n");
 	
-	while(!feof(png_file))
+	while(!feof(pfile.file))
 	{
 		// Read in chunk
-		fread(buffer, 1, 8, png_file);
+		fread(buffer, 1, 8, pfile.file);
 		
-		if(feof(png_file)) break;
+		if(feof(pfile.file)) break;
 		
 		memcpy(&chunk, buffer, 8);
 		
 		chunk.length = swap32(chunk.length);
 		if(chunk.length > 0);
 			chunk.data = (unsigned char *) malloc(chunk.length);
-		fread(chunk.data, 1, chunk.length, png_file);
-		fread(&chunk.checksum, 1, 4, png_file);
+		fread(chunk.data, 1, chunk.length, pfile.file);
+		fread(&chunk.checksum, 1, 4, pfile.file);
 		chunk.checksum = swap32(chunk.checksum);
 		
 		// Print it out
@@ -285,7 +297,7 @@ int main(void)
 		// Clean it up
 		free(chunk.data);
 	} 
-	fclose(png_file);
+	fclose(pfile.file);
 	
 	system("pause");
 	return 0;
