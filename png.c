@@ -56,30 +56,24 @@ unsigned int swap32(unsigned int val)
 #define PNG_IHDR_SIZE			13
 
 void process_IHDR(png_Chunk *chunk)
-{	
-	printf("process_IHDR()\n");
-	
-	if(chunk->length != PNG_IHDR_SIZE)
-	{
-		printf("Error: IHDR size != %d\n", PNG_IHDR_SIZE);
-		return;
-	}
+{
+	debug_if(chunk->length != PNG_IHDR_SIZE, ERROR, "IHDR size != %d\n", PNG_IHDR_SIZE);
 	
 	memcpy(&pfile, chunk->data, PNG_IHDR_SIZE);
 	
 	pfile.width = swap32(pfile.width);
 	pfile.height = swap32(pfile.height);
 	
-	printf("\tImage stats:\n");
-	printf("\t\t%dpx x %dpx\n", pfile.width, pfile.height);
-	printf("\t\tBit Depth = %d bits per sample\n", pfile.bit_depth);
-	printf("\t\tColor type:\n");
-	if(pfile.color_type & PNG_IHDR_PALETTE_USED) printf("\t\t\tPalette\n");
-	if(pfile.color_type & PNG_IHDR_COLOR_USED)	printf("\t\t\tColor\n");
-	if(pfile.color_type & PNG_IHDR_APLHA_USED)	printf("\t\t\tAlpha\n");
-	if(pfile.compression == 0) printf("\t\tCompression: method 0\n");
-	if(pfile.filter == 0) printf("\t\tFilter: method 0\n");
-	printf("\t\tInterlace: %s\n", pfile.interlace == 0 ? "none" : "Adam7");
+	debug(INFO, "Image stats:\n");
+	debug(INFO, "\t%dpx x %dpx\n", pfile.width, pfile.height);
+	debug(INFO, "\tBit Depth = %d bits per sample\n", pfile.bit_depth);
+	debug(INFO, "\tColor type:\n");
+	if(pfile.color_type & PNG_IHDR_PALETTE_USED) 	debug(INFO, "\t\tPalette\n");
+	if(pfile.color_type & PNG_IHDR_COLOR_USED)	 	debug(INFO, "\t\tColor\n");
+	if(pfile.color_type & PNG_IHDR_APLHA_USED)	 	debug(INFO, "\t\tAlpha\n");
+	if(pfile.compression == 0) 						debug(INFO, "\tCompression: method 0\n");
+	if(pfile.filter == 0) 							debug(INFO, "\tFilter: method 0\n");
+	debug(INFO, "\tInterlace: %s\n", pfile.interlace == 0 ? "none" : "Adam7");
 }
 #define ZLIB_CHUNK_SIZE 32768
 #define min(a,b) (((a) < (b)) ? (a) : (b))
@@ -93,11 +87,9 @@ void process_IDAT(png_Chunk *chunk)
 	int ret;
 	int bytes_processed = 0;
 	int bytes_output = 0;
-	unsigned char *in;
 	
 	idat_count++;
 	
-	printf("process_IDAT()\n");
 	if(idat_count == 1)
 	{
 		strm.zalloc = Z_NULL;
@@ -107,11 +99,14 @@ void process_IDAT(png_Chunk *chunk)
 		strm.next_in = Z_NULL;
     
 		ret = inflateInit(&strm);
-		if (ret != Z_OK)
-			printf("inflateInit() failed\n");
+		
+		debug_if(ret != Z_OK, ERROR, "inflateInit() failed\n");
 	}
+	
+	// length of 0 is legal
 	if (chunk->length == 0)
 		return;
+	
 	do	
 	{
 		strm.avail_in = min(chunk->length - bytes_processed, ZLIB_CHUNK_SIZE);
@@ -131,7 +126,7 @@ void process_IDAT(png_Chunk *chunk)
 					ret = Z_DATA_ERROR;     /* and fall through */
 				case Z_DATA_ERROR:
 				case Z_MEM_ERROR:
-					printf("inflate() error: %s.\n", strm.msg);
+					debug(ERROR, "inflate() error: %s.\n", strm.msg);
 					inflateEnd(&strm);
 					return;
 			}
@@ -139,21 +134,18 @@ void process_IDAT(png_Chunk *chunk)
 			bytes_output += (ZLIB_CHUNK_SIZE - strm.avail_out);
 		} while (strm.avail_out == 0);
 	} while (ret != Z_STREAM_END);
-	printf("\tInflate %d to %d bits\n", chunk->length, bytes_output);
+	
+	debug(INFO, "Inflated %d to %d bits\n", chunk->length, bytes_output);
 	inflateEnd(&strm);
 	return;
 }
 void process_IEND(png_Chunk *chunk)
 {
-	printf("process_IEND()\n");
 }
 
 void process_tEXt(png_Chunk *chunk)
 {
-	printf("process_tEXt() %d\n", chunk->length);
-	
-	printf("\t%s\n", chunk->data);
-	printf("\t%s\n", &chunk->data[strlen(chunk->data) + 1]);
+	debug(INFO, "%s - %s\n", chunk->data, &chunk->data[strlen(chunk->data) + 1]);
 }
 
 #define REGISTER_TYPE(x) {#x, *process_##x, 0}
@@ -235,18 +227,14 @@ void process_chunk(png_Chunk *chunk)
 	int i;
 	unsigned long c = CRC_ALL_ONES;
 	
-	printf("\n==================\n");
-	printf("Type    \"%.4s\"\n", chunk->type);
-	printf("Length  %d\n", chunk->length);
-	printf("CRC     0x%X\n", chunk->checksum);
-	printf("==================\n");
+	debug(INFO, "\n==================\n");
+	debug(INFO, "Type    \"%.4s\"\n", chunk->type);
+	debug(INFO, "Length  %d\n", chunk->length);
+	debug(INFO, "CRC     0x%X\n", chunk->checksum);
+	debug(INFO, "==================\n");
 	
 	// verify the type...not much we can do here
-	if(chunk_is_reserved(chunk))
-	{
-		printf("Chunk type has reserved bit set (i.e. type[2] is upper case)\n");
-		return;
-	}
+	debug_if(chunk_is_reserved(chunk), ERROR, "Chunk type has reserved bit set (i.e. type[2] is upper case)\n");
 	
 	// verify the checksum
 	c = update_crc(c, chunk->type, sizeof(chunk->type));
@@ -255,13 +243,8 @@ void process_chunk(png_Chunk *chunk)
 	
 	if(c != chunk->checksum)
 	{
-		printf("Error, checksum does not match!\n");
-		if(chunk_is_critical(chunk))
-		{
-			// abort since it is critical
-			// return;
-		}
-		printf("Calculated checksum as %x\n", c);
+		debug(WARN, "mismatched checksum, calculated as %X\n", c);
+		debug_if(chunk_is_critical(chunk), ERROR, "Critical chunk has wrong checksum\n");
 		return;
 	}
 	
@@ -275,8 +258,7 @@ void process_chunk(png_Chunk *chunk)
 		}
 	}
 	
-	if(i == len)
-		printf("Unregistered chunk type %.4s\n", chunk->type);
+	debug_if(i == len, WARN, "Unregistered chunk type %.4s\n", chunk->type);
 }
 
 int main(void)
@@ -286,18 +268,15 @@ int main(void)
 	unsigned char buffer[8];
 	png_Chunk chunk;
 	
-	pfile.file = fopen("test.png", "rb");
-	printf("%d\n", sizeof(pixel));
+	debug_level = INFO;
 	
-	if(pfile.file == NULL)
-	{
-		printf("Error: cannot open file\n");
-		return 1;
-	}
+	pfile.file = fopen("test.png", "rb");
+	
+	debug_if(pfile.file == NULL, ERROR, "cannot open file\n");
 	
 	fread(buffer, 1, 8, pfile.file);
-	if(!memcmp(header, buffer, 8))
-		printf("Magic header found\n");
+	
+	debug_if(memcmp(header, buffer, 8), ERROR, "header not indicitive of a png file\n");
 	
 	while(!feof(pfile.file))
 	{
@@ -315,14 +294,11 @@ int main(void)
 		fread(&chunk.checksum, 1, 4, pfile.file);
 		chunk.checksum = swap32(chunk.checksum);
 		
-		// Print it out
-		//printf("%d %.4s\n", chunk.length, chunk.type);
-		
-		// Process it
+		// Process the chunk
 		process_chunk(&chunk);
 		
 		// Clean it up
-		free(chunk.data);
+		if(chunk.data) free(chunk.data);
 	} 
 	fclose(pfile.file);
 	
