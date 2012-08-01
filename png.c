@@ -3,6 +3,7 @@
 #include <string.h>
 
 #include "zlib.h"
+#include "debug.h"
 
 typedef struct pixel
 {
