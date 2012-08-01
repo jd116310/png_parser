@@ -211,6 +211,23 @@ unsigned long update_crc(unsigned long crc, unsigned char *buf, int len)
 }
 
 #define CRC_ALL_ONES 0xffffffffL
+int chunk_is_critical(png_Chunk *chunk)
+{
+	return (chunk->type[0] & 32) == 0;
+}
+int chunk_is_privaite(png_Chunk *chunk)
+{
+	return (chunk->type[1] & 32) == 0;
+}
+int chunk_is_reserved(png_Chunk *chunk)
+{
+	return (chunk->type[2] & 32) == 1;
+}
+int chunk_is_unsafe_to_copy(png_Chunk *chunk)
+{
+	return (chunk->type[3] & 32) == 0;
+}
+
 void process_chunk(png_Chunk *chunk)
 {
 	int len = sizeof(callbacks) / sizeof(callbacks[0]);
@@ -223,18 +240,27 @@ void process_chunk(png_Chunk *chunk)
 	printf("CRC     0x%X\n", chunk->checksum);
 	printf("==================\n");
 	
+	// verify the type...not much we can do here
+	if(chunk_is_reserved(chunk))
+	{
+		printf("Chunk type has reserved bit set (i.e. type[2] is upper case)\n");
+		return;
+	}
+	
 	// verify the checksum
 	c = update_crc(c, chunk->type, sizeof(chunk->type));
 	c = update_crc(c, chunk->data, chunk->length);
 	c ^= CRC_ALL_ONES;
 	
-	
 	if(c != chunk->checksum)
 	{
 		printf("Error, checksum does not match!\n");
-		// if(critical())
-			// exit()
-		printf("%x %x\n", c, chunk->checksum);
+		if(chunk_is_critical(chunk))
+		{
+			// abort since it is critical
+			// return;
+		}
+		printf("Calculated checksum as %x\n", c);
 		return;
 	}
 	
