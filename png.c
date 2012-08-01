@@ -57,13 +57,17 @@ unsigned int swap32(unsigned int val)
 
 void process_IHDR(png_Chunk *chunk)
 {
+	// Ensure the chunk is 13 bytes
 	debug_if(chunk->length != PNG_IHDR_SIZE, ERROR, "IHDR size != %d\n", PNG_IHDR_SIZE);
 	
+	// Copy the data
 	memcpy(&pfile, chunk->data, PNG_IHDR_SIZE);
 	
+	// Swap the endianess
 	pfile.width = swap32(pfile.width);
 	pfile.height = swap32(pfile.height);
 	
+	// Print out statistics
 	debug(INFO, "Image stats:\n");
 	debug(INFO, "\t%dpx x %dpx\n", pfile.width, pfile.height);
 	debug(INFO, "\tBit Depth = %d bits per sample\n", pfile.bit_depth);
@@ -75,6 +79,7 @@ void process_IHDR(png_Chunk *chunk)
 	if(pfile.filter == 0) 							debug(INFO, "\tFilter: method 0\n");
 	debug(INFO, "\tInterlace: %s\n", pfile.interlace == 0 ? "none" : "Adam7");
 }
+
 #define ZLIB_CHUNK_SIZE 32768
 #define min(a,b) (((a) < (b)) ? (a) : (b))
 void process_IDAT(png_Chunk *chunk)
@@ -104,8 +109,7 @@ void process_IDAT(png_Chunk *chunk)
 	}
 	
 	// length of 0 is legal
-	if (chunk->length == 0)
-		return;
+	if (chunk->length == 0) return;
 	
 	do	
 	{
@@ -132,6 +136,8 @@ void process_IDAT(png_Chunk *chunk)
 			}
 			int have = ZLIB_CHUNK_SIZE - strm.avail_out;
 			bytes_output += (ZLIB_CHUNK_SIZE - strm.avail_out);
+			
+			// use the bytes in the output
 		} while (strm.avail_out == 0);
 	} while (ret != Z_STREAM_END);
 	
@@ -171,10 +177,8 @@ void make_crc_table(void)
 		c = (unsigned long) n;
 		for (k = 0; k < 8; k++)
 		{
-			if (c & 1)
-			c = 0xedb88320L ^ (c >> 1);
-			else
-			c = c >> 1;
+			if (c & 1) c = 0xedb88320L ^ (c >> 1);
+			else c = c >> 1;
 		}
 		crc_table[n] = c;
 	}
@@ -223,9 +227,9 @@ int chunk_is_unsafe_to_copy(png_Chunk *chunk)
 
 void process_chunk(png_Chunk *chunk)
 {
-	int len = sizeof(callbacks) / sizeof(callbacks[0]);
+	static int len = sizeof(callbacks) / sizeof(callbacks[0]);
 	int i;
-	unsigned long c = CRC_ALL_ONES;
+	unsigned long c;
 	
 	debug(INFO, "\n==================\n");
 	debug(INFO, "Type    \"%.4s\"\n", chunk->type);
@@ -237,13 +241,14 @@ void process_chunk(png_Chunk *chunk)
 	debug_if(chunk_is_reserved(chunk), ERROR, "Chunk type has reserved bit set (i.e. type[2] is upper case)\n");
 	
 	// verify the checksum
+	c = CRC_ALL_ONES;
 	c = update_crc(c, chunk->type, sizeof(chunk->type));
 	c = update_crc(c, chunk->data, chunk->length);
 	c ^= CRC_ALL_ONES;
 	
 	if(c != chunk->checksum)
 	{
-		debug(WARN, "mismatched checksum, calculated as %X\n", c);
+		debug(WARN, "Mismatched checksum, calculated as %X\n", c);
 		debug_if(chunk_is_critical(chunk), ERROR, "Critical chunk has wrong checksum\n");
 		return;
 	}
@@ -278,8 +283,10 @@ int main(void)
 	
 	debug_if(memcmp(header, buffer, 8), ERROR, "header not indicitive of a png file\n");
 	
-	while(!feof(pfile.file))
+	do
 	{
+		chunk.data = NULL;
+		
 		// Read in chunk
 		fread(buffer, 1, 8, pfile.file);
 		
@@ -288,7 +295,7 @@ int main(void)
 		memcpy(&chunk, buffer, 8);
 		
 		chunk.length = swap32(chunk.length);
-		if(chunk.length > 0);
+		if(chunk.length > 0)
 			chunk.data = (unsigned char *) malloc(chunk.length);
 		fread(chunk.data, 1, chunk.length, pfile.file);
 		fread(&chunk.checksum, 1, 4, pfile.file);
@@ -299,7 +306,8 @@ int main(void)
 		
 		// Clean it up
 		if(chunk.data) free(chunk.data);
-	} 
+	} while(!feof(pfile.file));
+	
 	fclose(pfile.file);
 	
 	system("pause");
