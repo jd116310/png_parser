@@ -18,6 +18,8 @@ typedef struct png_File
 	
 	FILE *file;
 	pixel *palette;
+	
+	unsigned char *image;
 } png_File;
 
 png_File pfile;
@@ -84,16 +86,19 @@ void process_IHDR(png_Chunk *chunk)
 #define min(a,b) (((a) < (b)) ? (a) : (b))
 void process_IDAT(png_Chunk *chunk)
 {
-    static z_stream strm;
-    static unsigned char out[ZLIB_CHUNK_SIZE];
+	z_stream strm;
+	int num_pixels = pfile.width * pfile.height;
+    unsigned char output_buffer[ZLIB_CHUNK_SIZE];
 	
 	static int idat_count = 0;
 	
 	int ret;
-	int bytes_processed = 0;
-	int bytes_output = 0;
+	static int bytes_processed = 0;
+	static int bytes_output = 0;
 	
 	idat_count++;
+	
+	pfile.image = (unsigned char *) malloc(num_pixels * 3 + pfile.height);
 	
 	if(idat_count == 1)
 	{
@@ -113,14 +118,14 @@ void process_IDAT(png_Chunk *chunk)
 	
 	do	
 	{
-		strm.avail_in = min(chunk->length - bytes_processed, ZLIB_CHUNK_SIZE);
+		strm.avail_in = chunk->length - bytes_processed;
 		strm.next_in = chunk->data + bytes_processed;
 		bytes_processed += strm.avail_in;
 		
 		do
 		{
 			strm.avail_out = ZLIB_CHUNK_SIZE;
-			strm.next_out = out;
+			strm.next_out = output_buffer;
 			
 			ret = inflate(&strm, Z_NO_FLUSH);
 			
@@ -135,14 +140,48 @@ void process_IDAT(png_Chunk *chunk)
 					return;
 			}
 			int have = ZLIB_CHUNK_SIZE - strm.avail_out;
-			bytes_output += (ZLIB_CHUNK_SIZE - strm.avail_out);
 			
-			// use the bytes in the output
+			memcpy(&pfile.image[bytes_output], output_buffer, have);
+			
+			bytes_output += have;
 		} while (strm.avail_out == 0);
 	} while (ret != Z_STREAM_END);
 	
+	FILE *ofile = fopen("out.pxl", "wb");
+	int i = 0;
+	for(int y = 0; y < pfile.height; ++y)
+	{
+		unsigned char r = 0, g = 0, b = 0;
+		int filter_type = pfile.image[i]; 
+		printf("%d\n", filter_type);
+		++i;
+		for(int x = 0; x < pfile.width; x++)
+		{
+			char rr = pfile.image[i];
+			char gg = pfile.image[i+1];
+			char bb = pfile.image[i+2];
+			if(filter_type == 1)
+			{
+				//printf(" %3d %3d %3d |", rr, gg, bb);
+				//printf("%3d %3d %3d\n", r, g, b);
+				r += rr;
+				g += gg;
+				b += bb;
+			}
+			fwrite(&r, 1, 1, ofile);
+			fwrite(&g, 1, 1, ofile);
+			fwrite(&b, 1, 1, ofile);
+			i += 3;
+			//system("pause");
+		}
+		//system("pause");
+	}
+	fclose(ofile);
 	debug(INFO, "Inflated %d to %d bits\n", chunk->length, bytes_output);
 	inflateEnd(&strm);
+	
+	free(pfile.image);
+	
 	return;
 }
 void process_IEND(png_Chunk *chunk)
