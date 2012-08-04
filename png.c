@@ -82,8 +82,33 @@ void process_IHDR(png_Chunk *chunk)
 	debug(INFO, "\tInterlace: %s\n", pfile.interlace == 0 ? "none" : "Adam7");
 }
 
+void filter_scanline(unsigned char filter_type, unsigned char *filt, int scanline_num)
+{
+	printf("%d %d\n", filter_type, scanline_num);
+	// unsigned char r = 0, g = 0, b = 0;
+	// int filter_type = pfile.image[i]; 
+	// printf("%d\n", filter_type);
+	// ++i;
+	// char rr = pfile.image[i];
+	// char gg = pfile.image[i+1];
+	// char bb = pfile.image[i+2];
+	// if(filter_type == 1)
+	// {
+		// printf(" %3d %3d %3d |", rr, gg, bb);
+		// printf("%3d %3d %3d\n", r, g, b);
+		// r += rr;
+		// g += gg;
+		// b += bb;
+	// }
+	// fwrite(&r, 1, 1, ofile);
+	// fwrite(&g, 1, 1, ofile);
+	// fwrite(&b, 1, 1, ofile);
+	// i += 3;
+	// system("pause");
+
+}
+
 #define ZLIB_CHUNK_SIZE 32768
-#define min(a,b) (((a) < (b)) ? (a) : (b))
 void process_IDAT(png_Chunk *chunk)
 {
 	z_stream strm;
@@ -116,19 +141,20 @@ void process_IDAT(png_Chunk *chunk)
 	// length of 0 is legal
 	if (chunk->length == 0) return;
 	
-	do	
+	do // while we still have input
 	{
 		strm.avail_in = chunk->length - bytes_processed;
 		strm.next_in = chunk->data + bytes_processed;
-		bytes_processed += strm.avail_in;
 		
-		do
+		do // while we still have input but the ouput is full
 		{
 			strm.avail_out = ZLIB_CHUNK_SIZE;
 			strm.next_out = output_buffer;
 			
+			// Inflate the stream
 			ret = inflate(&strm, Z_NO_FLUSH);
 			
+			// Check for errors
 			switch (ret)
 			{
 				case Z_NEED_DICT:
@@ -145,36 +171,17 @@ void process_IDAT(png_Chunk *chunk)
 			
 			bytes_output += have;
 		} while (strm.avail_out == 0);
+		
+		bytes_processed = chunk->length - bytes_processed;
 	} while (ret != Z_STREAM_END);
 	
 	FILE *ofile = fopen("out.pxl", "wb");
 	int i = 0;
-	for(int y = 0; y < pfile.height; ++y)
+	int count = 0;
+	for(int i = 0; i < num_pixels*3+pfile.height; )
 	{
-		unsigned char r = 0, g = 0, b = 0;
-		int filter_type = pfile.image[i]; 
-		printf("%d\n", filter_type);
-		++i;
-		for(int x = 0; x < pfile.width; x++)
-		{
-			char rr = pfile.image[i];
-			char gg = pfile.image[i+1];
-			char bb = pfile.image[i+2];
-			if(filter_type == 1)
-			{
-				//printf(" %3d %3d %3d |", rr, gg, bb);
-				//printf("%3d %3d %3d\n", r, g, b);
-				r += rr;
-				g += gg;
-				b += bb;
-			}
-			fwrite(&r, 1, 1, ofile);
-			fwrite(&g, 1, 1, ofile);
-			fwrite(&b, 1, 1, ofile);
-			i += 3;
-			//system("pause");
-		}
-		//system("pause");
+		filter_scanline(pfile.image[i], &pfile.image[i + 1], count++);
+		i += (pfile.width * 3 + 1);
 	}
 	fclose(ofile);
 	debug(INFO, "Inflated %d to %d bits\n", chunk->length, bytes_output);
