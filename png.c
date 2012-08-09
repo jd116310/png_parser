@@ -105,12 +105,6 @@ unsigned char paeth(int a, int b, int c)
 
 void filter_scanline(unsigned char filter_type, unsigned char *filt, int scanline_num)
 {
-	printf("%d %d\n", filter_type, scanline_num);
-	
-	// The 'a' byte
-
-
-	
 	for(int i = 0; i < pfile.width * 3; i += 3)
 	{
 		unsigned char a_r = (i == 0 ? 0 : pfile.image[scanline_num * pfile.width * 3 + i - 3]);
@@ -131,6 +125,8 @@ void filter_scanline(unsigned char filter_type, unsigned char *filt, int scanlin
 		
 		switch(filter_type)
 		{
+			case FILTER_TYPE_NONE:
+				break;
 			case FILTER_TYPE_SUB:
 				r += a_r;
 				g += a_g;
@@ -160,27 +156,6 @@ void filter_scanline(unsigned char filter_type, unsigned char *filt, int scanlin
 		pfile.image[scanline_num * pfile.width * 3 + i + 1] = g;
 		pfile.image[scanline_num * pfile.width * 3 + i + 2] = b;
 	}
-	// unsigned char r = 0, g = 0, b = 0;
-	// int filter_type = pfile.image[i]; 
-	// printf("%d\n", filter_type);
-	// ++i;
-	// char rr = pfile.image[i];
-	// char gg = pfile.image[i+1];
-	// char bb = pfile.image[i+2];
-	// if(filter_type == 1)
-	// {
-		// printf(" %3d %3d %3d |", rr, gg, bb);
-		// printf("%3d %3d %3d\n", r, g, b);
-		// r += rr;
-		// g += gg;
-		// b += bb;
-	// }
-	// fwrite(&r, 1, 1, ofile);
-	// fwrite(&g, 1, 1, ofile);
-	// fwrite(&b, 1, 1, ofile);
-	// i += 3;
-	// system("pause");
-
 }
 
 #define ZLIB_CHUNK_SIZE 32768
@@ -256,10 +231,10 @@ void process_IDAT(png_Chunk *chunk)
 			memmove(output_buffer, &output_buffer[i], left_over);
 			//memcpy(&pfile.image[bytes_output], output_buffer, have);
 			
-			bytes_output += (have - left_over); 
-			printf("%d\n", bytes_output);	
+			bytes_output += (have - left_over);
+			printf("inflate()\n");
 		} while (strm.avail_out == 0);
-		
+		printf("more input!\n");
 		// TODO: fix this
 		//bytes_processed = chunk->length - strm.avail_in;
 	} while (ret != Z_STREAM_END);
@@ -285,13 +260,24 @@ void process_tEXt(png_Chunk *chunk)
 	debug(INFO, "%s - %s\n", chunk->data, &chunk->data[strlen(chunk->data) + 1]);
 }
 
+void process_gAMA(png_Chunk *chunk)
+{
+	unsigned int gamma;
+	memcpy(&gamma, chunk->data, 4);
+	
+	gamma = swap32(gamma);
+	
+	debug(INFO, "Gamma: %d\n", gamma);
+}
+
 #define REGISTER_TYPE(x) {#x, *process_##x, 0}
 static png_Type_Callback callbacks[] = 
 {
 	REGISTER_TYPE(IHDR),
 	REGISTER_TYPE(IDAT),
 	REGISTER_TYPE(IEND),
-	REGISTER_TYPE(tEXt)
+	REGISTER_TYPE(tEXt),
+	REGISTER_TYPE(gAMA)
 };
 
 /* Table of CRCs of all 8-bit messages. */
