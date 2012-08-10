@@ -277,11 +277,29 @@ void process_tEXt(png_Chunk *chunk)
 void process_gAMA(png_Chunk *chunk)
 {
 	unsigned int gamma;
+	
 	memcpy(&gamma, chunk->data, 4);
 	
 	gamma = swap32(gamma);
 	
 	debug(INFO, "Gamma: %d\n", gamma);
+}
+
+void process_pHYs(png_Chunk *chunk)
+{
+	unsigned int x, y;
+	unsigned char unit;
+	
+	debug_if(chunk->length != 9, ERROR, "pHYs chunk lenght is %d, should be 9\n", chunk->length);
+	
+	memcpy(&x, &chunk->data[0], 4);
+	memcpy(&y, &chunk->data[4], 4);
+	unit = chunk->data[8];
+	
+	x = swap32(x);
+	y = swap32(y);
+	
+	debug(INFO, "Dimensions are %d x %d %s\n", x, y, unit == 0 ? "" : "meters");
 }
 
 #define REGISTER_TYPE(x) {#x, *process_##x, 0}
@@ -291,7 +309,8 @@ static png_Type_Callback callbacks[] =
 	REGISTER_TYPE(IDAT),
 	REGISTER_TYPE(IEND),
 	REGISTER_TYPE(tEXt),
-	REGISTER_TYPE(gAMA)
+	REGISTER_TYPE(gAMA),
+	REGISTER_TYPE(pHYs)
 };
 
 /* Table of CRCs of all 8-bit messages. */
