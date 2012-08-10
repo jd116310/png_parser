@@ -4,12 +4,6 @@
 
 #include "zlib.h"
 #include "debug.h"
-
-typedef struct pixel
-{
-	unsigned char r, g, b;
-} pixel;
-
 typedef struct png_File
 {
 	// make sure these are first
@@ -17,7 +11,7 @@ typedef struct png_File
 	unsigned char bit_depth, color_type, compression, filter, interlace;
 	
 	FILE *file;
-	pixel *palette;
+	unsigned char *palette;
 	
 	unsigned char *image;
 } png_File;
@@ -60,13 +54,13 @@ unsigned int swap32(unsigned int val)
 void process_IHDR(png_Chunk *chunk)
 {
 	// Ensure the chunk is 13 bytes
-	debug_if(chunk->length != PNG_IHDR_SIZE, ERROR, "IHDR size != %d\n", PNG_IHDR_SIZE);
+	debug_if(chunk->length != PNG_IHDR_SIZE, ERROR, "IHDR size is %d, should be %d\n",  chunk->length, PNG_IHDR_SIZE);
 	
 	// Copy the data
 	memcpy(&pfile, chunk->data, PNG_IHDR_SIZE);
 	
 	// Swap the endianess
-	pfile.width = swap32(pfile.width);
+	pfile.width  = swap32(pfile.width);
 	pfile.height = swap32(pfile.height);
 	
 	// Print out statistics
@@ -103,58 +97,39 @@ unsigned char paeth(int a, int b, int c)
 		return c;
 }
 
+// TODO: This is coded to handle the 'color' mode (i.e. rgb)
 void filter_scanline(unsigned char filter_type, unsigned char *filt, int scanline_num)
 {
-	for(int i = 0; i < pfile.width * 3; i += 3)
+	int bpp = 3; // bytes per pixel
+	for(int i = 0; i < pfile.width * bpp; i++)
 	{
-		unsigned char a_r = (i == 0 ? 0 : pfile.image[scanline_num * pfile.width * 3 + i - 3]);
-		unsigned char a_g = (i == 0 ? 0 : pfile.image[scanline_num * pfile.width * 3 + i + 1 - 3]);
-		unsigned char a_b = (i == 0 ? 0 : pfile.image[scanline_num * pfile.width * 3 + i + 2 - 3]);
-		
-		unsigned char b_r = (scanline_num == 0 ? 0 : pfile.image[(scanline_num - 1) * pfile.width * 3 + i]);
-		unsigned char b_g = (scanline_num == 0 ? 0 : pfile.image[(scanline_num - 1) * pfile.width * 3 + i + 1]);
-		unsigned char b_b = (scanline_num == 0 ? 0 : pfile.image[(scanline_num - 1) * pfile.width * 3 + i + 2]);
-		
-		unsigned char c_r = (scanline_num == 0 || i == 0 ? 0 : pfile.image[(scanline_num - 1) * pfile.width * 3 + i - 3]);
-		unsigned char c_g = (scanline_num == 0 || i == 0 ? 0 : pfile.image[(scanline_num - 1) * pfile.width * 3 + i + 1 - 3]);
-		unsigned char c_b = (scanline_num == 0 || i == 0 ? 0 : pfile.image[(scanline_num - 1) * pfile.width * 3 + i + 2 - 3]);
-		
-		unsigned char r = filt[i];
-		unsigned char g = filt[i+1];
-		unsigned char b = filt[i+2];
+		unsigned char a = (i < bpp ? 0 : pfile.image[scanline_num * pfile.width * bpp + i - bpp]);
+		unsigned char b = (scanline_num == 0 ? 0 : pfile.image[(scanline_num - 1) * pfile.width * bpp + i]);
+		unsigned char c = (scanline_num == 0 || i < bpp ? 0 : pfile.image[(scanline_num - 1) * pfile.width * bpp + i - bpp]);
+	
+		unsigned char sample = filt[i];
 		
 		switch(filter_type)
 		{
 			case FILTER_TYPE_NONE:
 				break;
 			case FILTER_TYPE_SUB:
-				r += a_r;
-				g += a_g;
-				b += a_b;
+				sample += a;
 				break;
 			case FILTER_TYPE_UP:
-				r += b_r;
-				g += b_g;
-				b += b_b;
+				sample += b;
 				break;
 			case FILTER_TYPE_AVG:
-				r += ((unsigned int)a_r + b_r) / 2;
-				g += ((unsigned int)a_g + b_g) / 2;
-				b += ((unsigned int)a_b + b_b) / 2;
+				sample += ((unsigned int)a + b) / 2;
 				break;
 			case FILTER_TYPE_PAETH:
-				// r = g = b = 0;
-				r += paeth(a_r, b_r, c_r);
-				g += paeth(a_g, b_g, c_g);
-				b += paeth(a_b, b_b, c_b);
+				sample += paeth(a, b, c);
 				break;
 			default:
 				debug(ERROR, "Uknown filter type %d", filter_type);
 		}
 		
-		pfile.image[scanline_num * pfile.width * 3 + i] = r;
-		pfile.image[scanline_num * pfile.width * 3 + i + 1] = g;
-		pfile.image[scanline_num * pfile.width * 3 + i + 2] = b;
+		pfile.image[scanline_num * pfile.width * bpp + i] = sample;
 	}
 }
 
@@ -240,8 +215,7 @@ void process_IDAT(png_Chunk *chunk)
 			left_over = have - i;
 			
 			// Move the left over bytes to the beginning of the buffer
-			memmove(&output_buffer[0], &output_buffer[i], left_over);
-			
+			memmove(&output_buffer[0], &output_buffer[i], left_over);			
 		} while(strm.avail_out == 0);
 	} while(strm.avail_in != 0);
 	
@@ -250,7 +224,7 @@ void process_IDAT(png_Chunk *chunk)
 		debug(INFO, "inflate() has reached the end of the stream\n");
 		debug(INFO, "Inflated %d to %d bits\n", strm.total_in, strm.total_out);
 		
-		// let zlib do its cleanpu
+		// let zlib do its cleanup
 		inflateEnd(&strm);
 		
 		// Lets write out the raw pixel data so we can verify it
@@ -265,6 +239,7 @@ void process_IDAT(png_Chunk *chunk)
 	
 	return;
 }
+
 void process_IEND(png_Chunk *chunk)
 {
 }
@@ -285,12 +260,13 @@ void process_gAMA(png_Chunk *chunk)
 	debug(INFO, "Gamma: %d\n", gamma);
 }
 
+#define PNG_pHYs_SIZE 9
 void process_pHYs(png_Chunk *chunk)
 {
 	unsigned int x, y;
 	unsigned char unit;
 	
-	debug_if(chunk->length != 9, ERROR, "pHYs chunk lenght is %d, should be 9\n", chunk->length);
+	debug_if(chunk->length != 9, ERROR, "pHYs chunk length is %d, should be %d\n", chunk->length, PNG_pHYs_SIZE);
 	
 	memcpy(&x, &chunk->data[0], 4);
 	memcpy(&y, &chunk->data[4], 4);
@@ -312,6 +288,7 @@ static png_Type_Callback callbacks[] =
 	REGISTER_TYPE(gAMA),
 	REGISTER_TYPE(pHYs)
 };
+
 
 /* Table of CRCs of all 8-bit messages. */
 unsigned long crc_table[256];
@@ -418,8 +395,7 @@ void process_chunk(png_Chunk *chunk)
 
 int main(void)
 {
-	const unsigned char header[] = {0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A};
-	unsigned int c;
+	const unsigned char magic_header[] = {0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A};
 	unsigned char buffer[8];
 	png_Chunk chunk;
 	
@@ -431,7 +407,7 @@ int main(void)
 	
 	fread(buffer, 1, 8, pfile.file);
 	
-	debug_if(memcmp(header, buffer, 8), ERROR, "header not indicitive of a png file\n");
+	debug_if(memcmp(magic_header, buffer, 8), ERROR, "header not indicitive of a png file\n");
 	
 	do
 	{
