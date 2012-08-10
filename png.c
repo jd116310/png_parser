@@ -170,8 +170,6 @@ void process_IDAT(png_Chunk *chunk)
 	int ret;
 	int count = 0;
 	int left_over = 0;
-	static int bytes_processed = 0;
-	static int bytes_output = 0;
 	
 	idat_count++;
 	
@@ -195,13 +193,13 @@ void process_IDAT(png_Chunk *chunk)
 	
 	do // while we still have input
 	{
-		strm.avail_in = chunk->length - bytes_processed;
-		strm.next_in = chunk->data + bytes_processed;
+		strm.avail_in = chunk->length - strm.total_in;
+		strm.next_in  = chunk->data + strm.total_in;
 		
 		do // while we still have input but the ouput is full
 		{
 			strm.avail_out = ZLIB_CHUNK_SIZE - left_over;
-			strm.next_out = output_buffer + left_over;
+			strm.next_out  = output_buffer + left_over;
 			
 			// Inflate the stream
 			ret = inflate(&strm, Z_NO_FLUSH);
@@ -228,15 +226,11 @@ void process_IDAT(png_Chunk *chunk)
 			}
 			
 			left_over = have - i;
-			memmove(output_buffer, &output_buffer[i], left_over);
-			//memcpy(&pfile.image[bytes_output], output_buffer, have);
 			
-			bytes_output += (have - left_over);
 			printf("inflate()\n");
 		} while (strm.avail_out == 0);
 		printf("more input!\n");
-		// TODO: fix this
-		//bytes_processed = chunk->length - strm.avail_in;
+		
 	} while (ret != Z_STREAM_END);
 	
 	FILE *ofile = fopen("out.pxl", "wb");
@@ -244,7 +238,7 @@ void process_IDAT(png_Chunk *chunk)
 	fclose(ofile);
 	
 	
-	debug(INFO, "Inflated %d to %d bits\n", chunk->length, bytes_output);
+	debug(INFO, "Inflated %d to %d bits\n", strm.total_in, strm.total_out);
 	inflateEnd(&strm);
 	
 	free(pfile.image);
