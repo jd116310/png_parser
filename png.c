@@ -161,20 +161,18 @@ void filter_scanline(unsigned char filter_type, unsigned char *filt, int scanlin
 #define ZLIB_CHUNK_SIZE 32768
 void process_IDAT(png_Chunk *chunk)
 {
-	z_stream strm;
-	int num_pixels = pfile.width * pfile.height;
-    unsigned char output_buffer[ZLIB_CHUNK_SIZE];
-	
+	static z_stream strm;
+    static unsigned char output_buffer[ZLIB_CHUNK_SIZE];
 	static int idat_count = 0;
+	static int count = 0;
+	static int left_over = 0;
 	
+	int num_pixels = pfile.width * pfile.height;
 	int ret;
-	int count = 0;
-	int left_over = 0;
 	
 	idat_count++;
 	
-	pfile.image = (unsigned char *) malloc(num_pixels * 3);
-	
+	// The very first time we want to initialize zlib
 	if(idat_count == 1)
 	{
 		strm.zalloc = Z_NULL;
@@ -186,38 +184,52 @@ void process_IDAT(png_Chunk *chunk)
 		ret = inflateInit(&strm);
 		
 		debug_if(ret != Z_OK, ERROR, "inflateInit() failed\n");
+		
+		// Malloc the data for the image
+		pfile.image = (unsigned char *) malloc(num_pixels * 3);
 	}
+	debug(INFO, "IDAT #%d\n", idat_count);
 	
 	// length of 0 is legal
 	if (chunk->length == 0) return;
 	
 	do // while we still have input
 	{
-		strm.avail_in = chunk->length - strm.total_in;
-		strm.next_in  = chunk->data + strm.total_in;
+		// TODO: cannot always set avail_in to length, must subtract the amount of data input so far
+		// to this call of process_IDAT(). strm.total_in will not work since it is static and keeps
+		// a running total from all process_IDAT() calls.
+		strm.avail_in = chunk->length;	// - bytes_input;
+		strm.next_in  = chunk->data;	// + bytes_input;
 		
 		do // while we still have input but the ouput is full
 		{
+			// left_over is the bytes leftover that do not complete a full scanline
 			strm.avail_out = ZLIB_CHUNK_SIZE - left_over;
 			strm.next_out  = output_buffer + left_over;
-			
+
 			// Inflate the stream
+			// TODO: figure out what Z_NO_FLUSH does and possibly use something else if its more appropriate
 			ret = inflate(&strm, Z_NO_FLUSH);
-			
-			// Check for errors
+
+			// Check for errors from inflate()
+			// This switch is from the zlib documentation
 			switch (ret)
 			{
 				case Z_NEED_DICT:
-					ret = Z_DATA_ERROR;     /* and fall through */
+					ret = Z_DATA_ERROR;
 				case Z_DATA_ERROR:
 				case Z_MEM_ERROR:
 					debug(ERROR, "inflate() error: %s.\n", strm.msg);
 					inflateEnd(&strm);
 					return;
 			}
+			
+			// Number of bytes output from the single inflate() call
 			int have = ZLIB_CHUNK_SIZE - strm.avail_out;
 			
+			// Calculate how many full scanlines we have
 			int full_lines = have / (pfile.width * 3 + 1);
+			
 			int i = 0;
 			while(full_lines--)
 			{
@@ -227,21 +239,29 @@ void process_IDAT(png_Chunk *chunk)
 			
 			left_over = have - i;
 			
-			printf("inflate()\n");
-		} while (strm.avail_out == 0);
-		printf("more input!\n");
+			// Move the left over bytes to the beginning of the buffer
+			memmove(&output_buffer[0], &output_buffer[i], left_over);
+			
+		} while(strm.avail_out == 0);
+	} while(strm.avail_in != 0);
+	
+	if(ret == Z_STREAM_END)
+	{
+		debug(INFO, "inflate() has reached the end of the stream\n");
+		debug(INFO, "Inflated %d to %d bits\n", strm.total_in, strm.total_out);
 		
-	} while (ret != Z_STREAM_END);
-	
-	FILE *ofile = fopen("out.pxl", "wb");
-	fwrite(pfile.image, 1, num_pixels * 3, ofile);
-	fclose(ofile);
-	
-	
-	debug(INFO, "Inflated %d to %d bits\n", strm.total_in, strm.total_out);
-	inflateEnd(&strm);
-	
-	free(pfile.image);
+		// let zlib do its cleanpu
+		inflateEnd(&strm);
+		
+		// Lets write out the raw pixel data so we can verify it
+		// with another program
+		FILE *ofile = fopen("out.pxl", "wb");
+		fwrite(pfile.image, 1, num_pixels * 3, ofile);
+		fclose(ofile);
+		
+		// Plug those leaks!
+		free(pfile.image);
+	}
 	
 	return;
 }
