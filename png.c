@@ -10,6 +10,8 @@ typedef struct png_File
 	int width, height;
 	unsigned char bit_depth, color_type, compression, filter, interlace;
 	
+	int bpp; // bits per pixel
+	
 	FILE *file;
 	unsigned char *palette;
 	
@@ -74,6 +76,16 @@ void process_IHDR(png_Chunk *chunk)
 	if(pfile.compression == 0) 						debug(INFO, "\tCompression: method 0\n");
 	if(pfile.filter == 0) 							debug(INFO, "\tFilter: method 0\n");
 	debug(INFO, "\tInterlace: %s\n", pfile.interlace == 0 ? "none" : "Adam7");
+	
+	pfile.bpp = 1; // At a minimum it has to be grayscale
+	
+	// TODO: figure out how many bits for using a palette
+	
+	if(pfile.color_type & PNG_IHDR_COLOR_USED)
+		pfile.bpp = 3;
+	
+	if(pfile.color_type & PNG_IHDR_APLHA_USED)
+		pfile.bpp += 1;
 }
 
 #define FILTER_TYPE_NONE	0
@@ -100,12 +112,11 @@ unsigned char paeth(int a, int b, int c)
 // TODO: This is coded to handle the 'color' mode (i.e. rgb)
 void filter_scanline(unsigned char filter_type, unsigned char *filt, int scanline_num)
 {
-	int bpp = 3; // bytes per pixel
-	for(int i = 0; i < pfile.width * bpp; i++)
+	for(int i = 0; i < pfile.width * pfile.bpp; i++)
 	{
-		unsigned char a = (i < bpp ? 0 : pfile.image[scanline_num * pfile.width * bpp + i - bpp]);
-		unsigned char b = (scanline_num == 0 ? 0 : pfile.image[(scanline_num - 1) * pfile.width * bpp + i]);
-		unsigned char c = (scanline_num == 0 || i < bpp ? 0 : pfile.image[(scanline_num - 1) * pfile.width * bpp + i - bpp]);
+		unsigned char a = (i < pfile.bpp ? 0 : pfile.image[scanline_num * pfile.width * pfile.bpp + i - pfile.bpp]);
+		unsigned char b = (scanline_num == 0 ? 0 : pfile.image[(scanline_num - 1) * pfile.width * pfile.bpp + i]);
+		unsigned char c = (scanline_num == 0 || i < pfile.bpp ? 0 : pfile.image[(scanline_num - 1) * pfile.width * pfile.bpp + i - pfile.bpp]);
 	
 		unsigned char sample = filt[i];
 		
@@ -129,7 +140,7 @@ void filter_scanline(unsigned char filter_type, unsigned char *filt, int scanlin
 				debug(ERROR, "Uknown filter type %d", filter_type);
 		}
 		
-		pfile.image[scanline_num * pfile.width * bpp + i] = sample;
+		pfile.image[scanline_num * pfile.width * pfile.bpp + i] = sample;
 	}
 }
 
@@ -161,7 +172,7 @@ void process_IDAT(png_Chunk *chunk)
 		debug_if(ret != Z_OK, ERROR, "inflateInit() failed\n");
 		
 		// Malloc the data for the image
-		pfile.image = (unsigned char *) malloc(num_pixels * 3);
+		pfile.image = (unsigned char *) malloc(num_pixels * pfile.bpp);
 	}
 	debug(INFO, "IDAT #%d\n", idat_count);
 	
@@ -203,13 +214,13 @@ void process_IDAT(png_Chunk *chunk)
 			int have = ZLIB_CHUNK_SIZE - strm.avail_out;
 			
 			// Calculate how many full scanlines we have
-			int full_lines = have / (pfile.width * 3 + 1);
+			int full_lines = have / (pfile.width * pfile.bpp + 1);
 			
 			int i = 0;
 			while(full_lines--)
 			{
 				filter_scanline(output_buffer[i], &output_buffer[i + 1], count++);
-				i += (pfile.width * 3 + 1);
+				i += (pfile.width * pfile.bpp + 1);
 			}
 			
 			left_over = have - i;
@@ -230,7 +241,7 @@ void process_IDAT(png_Chunk *chunk)
 		// Lets write out the raw pixel data so we can verify it
 		// with another program
 		FILE *ofile = fopen("out.pxl", "wb");
-		fwrite(pfile.image, 1, num_pixels * 3, ofile);
+		fwrite(pfile.image, 1, num_pixels * pfile.bpp, ofile);
 		fclose(ofile);
 		
 		// Plug those leaks!
@@ -401,7 +412,7 @@ int main(void)
 	
 	debug_level = INFO;
 	
-	pfile.file = fopen("test.png", "rb");
+	pfile.file = fopen("test/test.png", "rb");
 	
 	debug_if(pfile.file == NULL, ERROR, "cannot open file\n");
 	
