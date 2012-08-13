@@ -48,10 +48,16 @@ unsigned int swap32(unsigned int val)
     return ((val & 0xFF) << 24) | ((val & 0xFF00) << 8) | ((val >> 8) & 0xFF00) | ((val >> 24) & 0xFF);
 }
 
-#define PNG_IHDR_PALETTE_USED	1
-#define PNG_IHDR_COLOR_USED		2
-#define PNG_IHDR_APLHA_USED		4
-#define PNG_IHDR_SIZE			13
+#define PNG_IHDR_PALETTE_USED		1
+#define PNG_IHDR_TRUECOLOR_USED		2
+#define PNG_IHDR_APLHA_USED			4
+#define PNG_IHDR_SIZE				13
+
+#define PNG_COLOR_GREYSCALE			0
+#define PNG_COLOR_TRUECOLOR			2
+#define PNG_COLOR_INDEXED			3
+#define PNG_COLOR_GREYSCALE_ALPHA	4
+#define PNG_COLOR_TRUECOLOR_ALPHA	6
 
 void process_IHDR(png_Chunk *chunk)
 {
@@ -71,7 +77,7 @@ void process_IHDR(png_Chunk *chunk)
 	debug(INFO, "\tBit Depth = %d bits per sample\n", pfile.bit_depth);
 	debug(INFO, "\tColor type:\n");
 	if(pfile.color_type & PNG_IHDR_PALETTE_USED) 	debug(INFO, "\t\tPalette\n");
-	if(pfile.color_type & PNG_IHDR_COLOR_USED)	 	debug(INFO, "\t\tColor\n");
+	if(pfile.color_type & PNG_IHDR_TRUECOLOR_USED)	debug(INFO, "\t\tColor\n");
 	if(pfile.color_type & PNG_IHDR_APLHA_USED)	 	debug(INFO, "\t\tAlpha\n");
 	if(pfile.compression == 0) 						debug(INFO, "\tCompression: method 0\n");
 	if(pfile.filter == 0) 							debug(INFO, "\tFilter: method 0\n");
@@ -81,11 +87,24 @@ void process_IHDR(png_Chunk *chunk)
 	
 	// TODO: figure out how many bits for using a palette
 	
-	if(pfile.color_type & PNG_IHDR_COLOR_USED)
+	if(pfile.color_type & PNG_IHDR_TRUECOLOR_USED)
 		pfile.bpp = 3;
 	
 	if(pfile.color_type & PNG_IHDR_APLHA_USED)
 		pfile.bpp += 1;
+}
+
+void process_PLTE(png_Chunk *chunk)
+{
+	debug_if(chunk->length % 3 != 0, ERROR, "Palette chunk length not divisible by 3");
+	debug_if(pfile.color_type == PNG_COLOR_GREYSCALE, ERROR, "Palette chunk present when greyscale color is used");
+	debug_if(pfile.color_type == PNG_COLOR_GREYSCALE_ALPHA, ERROR, "Palette chunk present when greyscale with alpha is used");
+	
+	int pixels = chunk->length / 3;
+	
+	debug(INFO, "Palette contains %d colors", pixels);
+	
+	// TODO: finish handling palette
 }
 
 #define FILTER_TYPE_NONE	0
@@ -109,7 +128,6 @@ unsigned char paeth(int a, int b, int c)
 		return c;
 }
 
-// TODO: This is coded to handle the 'color' mode (i.e. rgb)
 void filter_scanline(unsigned char filter_type, unsigned char *filt, int scanline_num)
 {
 	for(int i = 0; i < pfile.width * pfile.bpp; i++)
@@ -243,9 +261,6 @@ void process_IDAT(png_Chunk *chunk)
 		FILE *ofile = fopen("out.pxl", "wb");
 		fwrite(pfile.image, 1, num_pixels * pfile.bpp, ofile);
 		fclose(ofile);
-		
-		// Plug those leaks!
-		free(pfile.image);
 	}
 	
 	return;
@@ -293,6 +308,7 @@ void process_pHYs(png_Chunk *chunk)
 static png_Type_Callback callbacks[] = 
 {
 	REGISTER_TYPE(IHDR),
+	REGISTER_TYPE(PLTE),
 	REGISTER_TYPE(IDAT),
 	REGISTER_TYPE(IEND),
 	REGISTER_TYPE(tEXt),
@@ -446,6 +462,10 @@ int main(void)
 	} while(!feof(pfile.file));
 	
 	fclose(pfile.file);
+	
+	// Plug those leaks!
+	if(pfile.image) free(pfile.image);
+	if(pfile.palette) free(pfile.palette);
 	
 	system("pause");
 	return 0;
